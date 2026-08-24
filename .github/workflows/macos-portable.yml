@@ -1,0 +1,95 @@
+name: macOS portable
+
+# Собрать .app под macOS с Windows нельзя — кросс-компиляции для Apple нет.
+# Поэтому сборка живёт здесь, на раннере macOS, и запускается руками.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег релиза, куда приложить сборку (пусто — только артефакт)"
+        default: v0.1.0
+      universal:
+        description: "Универсальный бинарник (Intel + Apple Silicon)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Без кэша каждая сборка тянет весь Tauri с нуля — это минуты.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Проверить типы
+        run: npx tsc --noEmit
+
+      # Единственное, что мы реально можем проверить без macOS под рукой:
+      # ядро (обход папки, разбор JSON, дерево, индекс) на настоящей системе.
+      - name: Тесты ядра на macOS
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Собрать фронтенд
+        run: npm run build
+
+      - name: Собрать .app
+        run: |
+          if [ "${{ inputs.universal }}" = "true" ]; then
+            npm run tauri build -- --target universal-apple-darwin --bundles app
+          else
+            npm run tauri build -- --bundles app
+          fi
+
+      # Версию берём из конфига, чтобы имя файла не разъезжалось с релизом.
+      - name: Имя архива
+        id: name
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          ARCH=$([ "${{ inputs.universal }}" = "true" ] && echo universal || echo aarch64)
+          echo "file=Structuraj_${VERSION}_macos-${ARCH}-portable.zip" >> "$GITHUB_OUTPUT"
+
+      # ditto, а не zip: сохраняет структуру бандла, симлинки и права на запуск.
+      # Обычный zip ломает .app так, что он перестаёт открываться.
+      - name: Упаковать бандл
+        run: |
+          APP=$(find src-tauri/target -maxdepth 6 -name "*.app" -type d | head -1)
+          if [ -z "$APP" ]; then echo "::error::.app не найден"; exit 1; fi
+          echo "нашёл: $APP"
+          codesign -dv "$APP" 2>&1 | head -5 || echo "подписи нет — ожидаемо"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "${{ steps.name.outputs.file }}"
+          ls -lh "${{ steps.name.outputs.file }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Structuraj-macos-portable
+          path: ${{ steps.name.outputs.file }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Приложить к релизу
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            "${{ steps.name.outputs.file }}" --clobber
+          echo "выложено в релиз ${{ inputs.release_tag }}"
