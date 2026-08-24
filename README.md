@@ -83,3 +83,7 @@ cd src-tauri && cargo test --test pipeline -- --ignored --nocapture
 
 Кладут в `src-tauri/tests/samples/` файлы `STRUCTURE-BY-NAME.md`,
 `STRUCTURE-BY-PATH.md` и `API-SAMPLES.json` — чтобы глазами посмотреть форматы.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).
