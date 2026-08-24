@@ -1,0 +1,53 @@
+[
+  {
+    "id": 1,
+    "name": "alpha",
+    "price": 10.5,
+    "user": {
+      "name": "ann",
+      "age": 30
+    },
+    "tags": [
+      "x",
+      "y"
+    ],
+    "note": null,
+    "blank": "   ",
+    "emptyBox": {
+      "inner": null
+    }
+  },
+  {
+    "id": 2,
+    "name": "beta",
+    "price": null,
+    "user": {
+      "name": "bob"
+    },
+    "tags": [],
+    "extra": true,
+    "note": null,
+    "emptyBox": {
+      "inner": null
+    }
+  },
+  {
+    "id": 3,
+    "title": "gamma",
+    "order": {
+      "name": "ord-3",
+      "total": 99
+    },
+    "items": [
+      {
+        "sku": "s1",
+        "qty": 2
+      },
+      {
+        "sku": "s2",
+        "qty": 1
+      }
+    ],
+    "note": null
+  }
+]
