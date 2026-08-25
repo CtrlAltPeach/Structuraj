@@ -5,6 +5,7 @@ import type {
 } from "react";
 import { getValues } from "../api";
 import { fmtInt } from "../format";
+import { isPureArray } from "../nodes";
 import type { FileRow, SortKey, SortOrder, TreeNode, ValuePage } from "../types";
 
 const PAGE = 200;
@@ -164,7 +165,9 @@ export function ValuesTab({ node, files, onOpenRecord }: Props) {
   if (!node) {
     return <div className="empty">Выбери ключ в дереве слева.</div>;
   }
-  if (node.isArray) {
+  // Только чистый массив нечего показывать. Ключ со смешанными типами —
+  // строка в одних файлах, массив в других — обязан отдавать свои значения.
+  if (isPureArray(node)) {
     return (
       <div className="empty">
         <b>{node.key}</b> — массив. Массивы значений не показывают, они нужны только

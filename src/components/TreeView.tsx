@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TreeNode } from "../types";
 import { fmtInt } from "../format";
+import { isPureArray, typeLabel } from "../nodes";
 
 interface Props {
   nodes: TreeNode[];
@@ -182,12 +183,12 @@ export function TreeView({ nodes, selectedId, onSelect, filter, hideEmpty }: Pro
           className={
             "tree-row" +
             (row.node.id === selectedId ? " is-selected" : "") +
-            (row.node.isArray ? " is-container" : "")
+            (isPureArray(row.node) ? " is-container" : "")
           }
           style={{ paddingLeft: 3 + row.depth * 14 }}
           onClick={() => {
             onSelect(row.node);
-            if (row.node.isArray && row.hasKids) toggle(row.node.id);
+            if (isPureArray(row.node) && row.hasKids) toggle(row.node.id);
             rootRef.current?.focus();
           }}
         >
@@ -208,7 +209,7 @@ export function TreeView({ nodes, selectedId, onSelect, filter, hideEmpty }: Pro
           <span className="tree-key">{row.node.key}</span>
 
           <span className="tree-type">
-            {row.node.isArray ? "массив" : row.node.types.join(" | ") || "объект"}
+            {typeLabel(row.node)}
           </span>
 
           {row.node.nonEmpty === 0 && (

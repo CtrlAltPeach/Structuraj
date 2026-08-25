@@ -16,11 +16,20 @@ fn samples() -> PathBuf {
     dir
 }
 
-fn scan_fixtures(tag: &str) -> rusqlite::Connection {
+fn scan_dir(tag: &str, dir: &PathBuf) -> rusqlite::Connection {
     let dbp = std::env::temp_dir().join(format!("structuraj-test-{tag}.sqlite"));
     let conn = db::open_fresh(&dbp).expect("база не создалась");
-    scan::scan(&fixtures(), &conn, |_| {}).expect("скан упал");
+    scan::scan(dir, &conn, |_| {}).expect("скан упал");
     conn
+}
+
+fn scan_fixtures(tag: &str) -> rusqlite::Connection {
+    scan_dir(tag, &fixtures())
+}
+
+/// Отдельный набор: один и тот же ключ строкой в одном файле и массивом в другом.
+fn fixtures_mixed() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures-mixed")
 }
 
 fn find<'a>(nodes: &'a [TreeNode], key: &str) -> Option<&'a TreeNode> {
@@ -306,4 +315,107 @@ fn always_empty_keys_are_marked() {
     // Родитель непустого ключа тоже считается непустым: иначе фильтр срезал бы ветку.
     let user = find(&nodes, "user").expect("нет узла user");
     assert!(user.non_empty > 0, "user содержит непустой name");
+}
+
+/// Регрессия: ключ, который в одних файлах строка, а в других массив, не должен
+/// терять свои значения. Флаг `is_array` ставится на путь один раз и уже не
+/// снимается, поэтому опираться на него, решая «показывать ли значения», нельзя —
+/// правду говорит только список типов.
+#[test]
+fn mixed_type_key_keeps_values_reachable() {
+    let conn = scan_dir("mixed", &fixtures_mixed());
+
+    for mode in ["byName", "byPath"] {
+        let nodes = tree::build(&conn, mode).unwrap();
+        let content = find(&nodes, "content").unwrap_or_else(|| panic!("нет узла content в {mode}"));
+
+        assert!(
+            content.types.contains(&"string".to_string()),
+            "{mode}: строковые вхождения потерялись, типы: {:?}",
+            content.types
+        );
+        assert!(
+            content.types.contains(&"array".to_string()),
+            "{mode}: массивные вхождения потерялись, типы: {:?}",
+            content.types
+        );
+        assert!(
+            content.is_array,
+            "{mode}: флаг массива поднимается по любому вхождению — это ожидаемо"
+        );
+
+        let page = query::values(
+            &conn,
+            &ValueQuery {
+                path_ids: content.path_ids.clone(),
+                filter: None,
+                file_id: None,
+                sort: "value".into(),
+                order: "asc".into(),
+                offset: 0,
+                limit: 100,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            page.total, 2,
+            "{mode}: у ключа должны остаться две строки, а не ноль"
+        );
+        let vals: Vec<_> = page.rows.iter().filter_map(|r| r.value.clone()).collect();
+        assert_eq!(vals, vec!["второй".to_string(), "первый".to_string()]);
+    }
+}
+
+/// Ручная проверка на реальном наборе. Путь задаётся через STRUCTURAJ_TEST_DIR.
+/// Запуск: STRUCTURAJ_TEST_DIR=... cargo test --test pipeline -- --ignored real_dataset --nocapture
+#[test]
+#[ignore]
+fn real_dataset_key_report() {
+    let Ok(dir) = std::env::var("STRUCTURAJ_TEST_DIR") else {
+        println!("STRUCTURAJ_TEST_DIR не задан, пропускаю");
+        return;
+    };
+    let key = std::env::var("STRUCTURAJ_TEST_KEY").unwrap_or_else(|_| "content".to_string());
+    let conn = scan_dir("real", &PathBuf::from(&dir));
+    let s = query::summary(&conn).unwrap();
+    println!(
+        "файлов {}, записей {}, ключей {}, значений {}, ошибок в {} файлах",
+        s.files_scanned, s.records, s.keys, s.values, s.files_failed
+    );
+
+    for mode in ["byName", "byPath"] {
+        let nodes = tree::build(&conn, mode).unwrap();
+        let Some(node) = find(&nodes, &key) else {
+            println!("[{mode}] узел '{key}' не найден");
+            continue;
+        };
+        println!(
+            "\n[{mode}] {} — типы {:?}, is_array={}, вхождений {}, путей {}",
+            node.key,
+            node.types,
+            node.is_array,
+            node.count,
+            node.paths.len()
+        );
+        let page = query::values(
+            &conn,
+            &ValueQuery {
+                path_ids: node.path_ids.clone(),
+                filter: None,
+                file_id: None,
+                sort: "rec".into(),
+                order: "asc".into(),
+                offset: 0,
+                limit: 3,
+            },
+        )
+        .unwrap();
+        println!("   значений доступно: {}", page.total);
+        for r in &page.rows {
+            let v = r.value.clone().unwrap_or_else(|| "—".into());
+            let v: String = v.chars().take(60).collect();
+            println!("   {} #{} [{}] {}", r.file, r.rec, r.vtype, v);
+        }
+    }
 }
